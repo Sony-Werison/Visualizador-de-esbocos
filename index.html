@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador de Documentos</title>
+    
+    <!-- Meta tags para "Adicionar à Tela Inicial" (PWA) -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Doc Viewer">
+    <meta name="apple-mobile-web-app-title" content="Doc Viewer">
+    <meta name="theme-color" content="#191919">
+    <meta name="msapplication-navbutton-color" content="#191919">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="msapplication-starturl" content="/">
+
+    <!-- Favicon -->
+    <link rel="icon" href="favicon.png">
+    <link rel="shortcut icon" href="favicon.png">
+    <link rel="apple-touch-icon" href="favicon.png">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Bibliotecas para converter .docx e .pdf -->
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.5.1/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Poppins:wght@400;500;700&family=Merriweather:wght@400;700&family=Lora:wght@400;700&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --font-sans: 'Inter', sans-serif;
+            --font-serif: 'Merriweather', serif;
+            --font-display: 'Poppins', sans-serif;
+            --font-lora: 'Lora', serif;
+            --font-baskerville: 'Libre Baskerville', serif;
+            --app-height: 100vh;
+        }
+        body { font-family: var(--font-sans); touch-action: pan-y; overflow: hidden; }
+        #app { height: var(--app-height); }
+
+        .font-sans { font-family: var(--font-sans); }
+        .font-serif { font-family: var(--font-serif); }
+        .font-display { font-family: var(--font-display); }
+        .font-lora { font-family: var(--font-lora); }
+        .font-baskerville { font-family: var(--font-baskerville); }
+        .leading-extra { line-height: 2.5 !important; }
+
+        .slide-content { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .settings-panel, .history-sidebar, .callouts-sidebar { transition: transform 0.3s ease-in-out; }
+        .settings-panel { transform: translateX(100%); }
+        .settings-panel.open { transform: translateX(0); }
+        .history-sidebar, .callouts-sidebar { transform: translateX(-100%); }
+        .history-sidebar.open, .callouts-sidebar.open { transform: translateX(0); }
+        #slides-container::-webkit-scrollbar, #history-list::-webkit-scrollbar, .settings-panel-content::-webkit-scrollbar, #callouts-list::-webkit-scrollbar { width: 8px; }
+        #slides-container::-webkit-scrollbar-track, #history-list::-webkit-scrollbar-track, .settings-panel-content::-webkit-scrollbar-track, #callouts-list::-webkit-scrollbar-track { background: transparent; }
+        #slides-container::-webkit-scrollbar-thumb, #history-list::-webkit-scrollbar-thumb, .settings-panel-content::-webkit-scrollbar-thumb, #callouts-list::-webkit-scrollbar-thumb { background-color: #4b5563; border-radius: 4px; }
+        #doc-progress-bar, #page-progress-bar { transition: width 0.3s ease-out; }
+        
+        /* Estilos para listas aninhadas (gerados pelo mammoth.js) */
+        .slide-content ul ul { list-style-type: circle; margin-left: 1.5rem; }
+        .slide-content ul ul ul { list-style-type: square; margin-left: 1.5rem; }
+        .slide-content ol ol { list-style-type: lower-alpha; margin-left: 1.5rem; }
+        .slide-content ol ol ol { list-style-type: lower-roman; margin-left: 1.5rem; }
+        
+        /* Estilos para Callouts (Destaques com Emoji) */
+        .doc-callout {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: flex-start;
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+        }
+        .doc-callout .emoji {
+            font-size: 1.25rem;
+            width: 1.5rem;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .doc-callout .content {
+            flex: 1 1 0%;
+            margin-left: 0.75rem;
+        }
+        .doc-callout .content p { margin: 0 !important; }
+
+        /* --- Dark Theme (Default) --- */
+        html.theme-dark body { background-color: #191919; color: #d1d5db; }
+        html.theme-dark #setup-view { background-color: #191919; }
+        html.theme-dark #drop-area { border-color: #4b5563; }
+        html.theme-dark #drop-area:hover { border-color: #60a5fa; }
+        html.theme-dark .control-btn-group { background-color: #374151; }
+        html.theme-dark .control-btn-group button.active { background-color: #4b5563; color: white; }
+        html.theme-dark .font-selector button.active { background-color: #4b5563; }
+        html.theme-dark .history-item.active { background-color: #475569 !important; color: white !important; }
+        html.theme-dark header, html.theme-dark footer { background-color: rgba(25, 25, 25, 0.85); backdrop-filter: blur(4px); }
+        html.theme-dark .settings-panel, html.theme-dark .history-sidebar { background-color: rgba(31, 41, 55, 0.95); backdrop-filter: blur(4px); }
+        html.theme-dark hr { border-color: #374151; }
+        html.theme-dark .doc-callout { background-color: rgba(255, 255, 255, 0.05); }
+
+        /* --- Light Theme Styles --- */
+        html.theme-light body { background-color: #f9fafb; color: #111827; }
+        html.theme-light #setup-view { background-color: #ffffff; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+        html.theme-light #drop-area { border-color: #d1d5db; }
+        html.theme-light #drop-area:hover { border-color: #3b82f6; }
+        html.theme-light header, html.theme-light footer { background-color: rgba(255, 255, 255, 0.85); backdrop-filter: blur(4px); }
+        html.theme-light .settings-panel, html.theme-light .history-sidebar { background-color: rgba(249, 250, 251, 0.95); backdrop-filter: blur(4px); }
+        html.theme-light .control-btn-group { background-color: #e5e7eb; }
+        html.theme-light .control-btn-group button.active { background-color: #ffffff; color: #111827; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }
+        html.theme-light .font-selector button.active { background-color: #dbeafe; color: #1e40af;}
+        html.theme-light .history-item.active { background-color: #dbeafe !important; color: #1e40af !important; }
+        html.theme-light hr { border-color: #e5e7eb; }
+        html.theme-light .doc-callout { background-color: #f3f4f6; }
+
+        /* --- Sepia Theme --- */
+        html.theme-sepia body { background-color: #f4e8d1; color: #5b4636; }
+        html.theme-sepia #setup-view { background-color: #f4e8d1; }
+        html.theme-sepia #drop-area { border-color: #c9bc9d; }
+        html.theme-sepia #drop-area:hover { border-color: #a18a75; }
+        html.theme-sepia header, html.theme-sepia footer { background-color: rgba(244, 232, 209, 0.85); backdrop-filter: blur(4px); }
+        html.theme-sepia .settings-panel, html.theme-sepia .history-sidebar { background-color: rgba(229, 217, 193, 0.95); }
+        html.theme-sepia .control-btn-group { background-color: #dcd1b8; }
+        html.theme-sepia .control-btn-group button.active { background-color: #c9bc9d; }
+        html.theme-sepia .font-selector button.active { background-color: #c9bc9d; }
+        html.theme-sepia hr { border-color: #c9bc9d; }
+        html.theme-sepia .doc-callout { background-color: rgba(91, 70, 54, 0.08); }
+        
+        /* --- Sidebar Push Effect --- */
+        #presentation-view > header,
+        #presentation-view > footer,
+        #presentation-view > main {
+            transition: margin-left 0.3s ease-in-out, margin-right 0.3s ease-in-out, width 0.3s ease-in-out;
+            width: 100%;
+        }
+        body.history-open #presentation-view > header,
+        body.history-open #presentation-view > footer,
+        body.history-open #presentation-view > main {
+            margin-left: 33.3333%;
+            width: calc(100% - 33.3333%);
+        }
+        body.settings-open #presentation-view > header,
+        body.settings-open #presentation-view > footer,
+        body.settings-open #presentation-view > main {
+            margin-right: 20rem; /* w-80 */
+            width: calc(100% - 20rem);
+        }
+        #history-sidebar { width: 33.3333%; }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen">
+<div id="app" class="w-full flex flex-col">
+    <!-- Tela de Configuração Inicial -->
+    <div id="setup-view" class="w-full h-full flex flex-col items-center justify-center">
+        <div class="w-full max-w-xl mx-auto p-8 rounded-xl space-y-6">
+            <h1 class="text-3xl font-bold text-center">Visualizador de Documentos</h1>
+            <p class="text-center text-gray-400">Arraste e solte um arquivo .docx ou .pdf para começar.</p>
+            
+            <div id="drop-area" class="w-full p-10 border-2 border-dashed rounded-lg text-center cursor-pointer transition">
+                <input type="file" id="file-input" class="hidden" accept=".docx,.pdf">
+                <p>Clique aqui para selecionar um arquivo</p>
+                <p class="text-sm text-gray-500 mt-1">(.docx ou .pdf)</p>
+            </div>
+
+            <div class="flex items-center my-2">
+                <hr class="flex-grow border-t">
+                <span class="px-4 text-gray-500">ou</span>
+                <hr class="flex-grow border-t">
+            </div>
+
+            <button id="preview-btn" class="w-full bg-gray-600 text-white font-bold py-3 rounded-lg hover:bg-gray-700 transition">Ver Tutorial</button>
+            
+            <div id="error-message" class="text-red-500 text-center font-medium hidden"></div>
+        </div>
+    </div>
+
+    <!-- Tela de Apresentação -->
+    <div id="presentation-view" class="hidden w-full h-full flex-col relative overflow-hidden">
+        <header class="w-full p-4 flex justify-between items-center fixed top-0 left-0 z-20">
+            <div class="w-1/3 flex items-center gap-2">
+                 <button id="home-btn" title="Voltar ao Início" class="header-btn p-2.5 rounded-lg transition"></button>
+                <span id="clock" class="text-lg font-mono"></span>
+            </div>
+            <div class="w-1/3 text-center">
+                <h1 id="page-title" class="text-sm font-semibold truncate"></h1>
+            </div>
+            <div class="w-1/3 flex justify-end items-center gap-2">
+                 <button id="auto-scroll-toggle-btn" title="Rolagem Automática" class="header-btn p-2.5 rounded-lg transition"></button>
+                <div id="main-timer-controls" class="header-btn flex items-center gap-2 p-2 rounded-lg">
+                    <button id="timer-play-pause-btn" title="Iniciar/Pausar Tempo" class="p-0.5"></button>
+                    <span id="overall-timer" class="text-lg font-mono" title="Tempo total da sessão">0:00</span>
+                </div>
+                <button id="settings-toggle-btn" title="Ajustes" class="header-btn p-2.5 rounded-lg transition"></button>
+            </div>
+        </header>
+        
+        <main id="slides-container" class="w-full h-full flex-1 flex flex-col items-center overflow-y-auto px-12 pt-24 pb-24"></main>
+        
+        <footer id="footer-bar" class="w-full p-4 flex justify-between items-center fixed bottom-0 left-0 z-20">
+            <div class="w-1/4 flex items-center gap-2">
+                <button id="history-toggle-btn" title="Navegação / Histórico" class="footer-btn hidden p-3 rounded-full transition"></button>
+            </div>
+            <div id="footer-center" class="w-1/2 px-4">
+                <!-- Conteúdo do rodapé injetado via JS -->
+            </div>
+            <div class="w-1/4 flex justify-end items-center gap-2">
+                <button id="prev-btn" title="Anterior" class="footer-btn p-3 rounded-full disabled:opacity-20 transition"></button>
+                <button id="next-btn" title="Próximo" class="footer-btn p-3 rounded-full disabled:opacity-20 transition"></button>
+            </div>
+        </footer>
+        
+        <aside id="history-sidebar" class="history-sidebar fixed top-0 left-0 h-full shadow-2xl z-40 flex flex-col">
+             <div class="p-4 flex justify-between items-center border-b">
+                <h3 class="font-bold text-lg">Navegação</h3>
+                <button id="close-history-btn" title="Fechar" class="p-2"></button>
+            </div>
+            <div id="history-list" class="flex-1 overflow-y-auto"></div>
+        </aside>
+
+        <aside id="settings-panel" class="settings-panel fixed top-0 right-0 h-full w-80 shadow-2xl z-40 flex flex-col">
+            <div class="p-4 flex justify-between items-center border-b">
+                <h3 class="font-bold text-lg">Ajustes</h3>
+                <button id="close-settings-btn" title="Fechar" class="p-2"></button>
+            </div>
+            <div class="settings-panel-content flex-1 p-6 space-y-8 overflow-y-auto">
+                <!-- Configurações mantidas da versão anterior -->
+                <div>
+                    <h4 class="font-semibold mb-3">Modo de Exibição</h4>
+                    <div class="control-btn-group flex rounded-md p-1">
+                        <button data-setting="displayMode" data-value="slides" class="flex-1 px-2 py-1 rounded">Páginas</button>
+                        <button data-setting="displayMode" data-value="scroll" class="flex-1 px-2 py-1 rounded">Rolagem</button>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="font-semibold mb-3">Cor da Página</h4>
+                    <div class="flex justify-around items-center p-1">
+                        <button data-setting="theme" data-value="light" class="theme-btn w-8 h-8 rounded-full bg-white border-2" title="Claro"></button>
+                        <button data-setting="theme" data-value="dark" class="theme-btn w-8 h-8 rounded-full bg-[#191919] border-2" title="Escuro"></button>
+                        <button data-setting="theme" data-value="sepia" class="theme-btn w-8 h-8 rounded-full bg-[#f4e8d1] border-2" title="Sépia"></button>
+                    </div>
+                </div>
+                 <div>
+                    <h4 class="font-semibold mb-3">Fonte</h4>
+                    <div class="font-selector flex flex-wrap gap-2 justify-center">
+                        <button data-setting="fontFamily" data-value="font-sans" class="w-20 h-20 flex flex-col items-center justify-center rounded-md transition"><div class="text-3xl font-sans">Aa</div><span class="text-xs mt-1">Inter</span></button>
+                        <button data-setting="fontFamily" data-value="font-serif" class="w-20 h-20 flex flex-col items-center justify-center rounded-md transition"><div class="text-3xl font-serif">Aa</div><span class="text-xs mt-1">Merriweather</span></button>
+                        <button data-setting="fontFamily" data-value="font-display" class="w-20 h-20 flex flex-col items-center justify-center rounded-md transition"><div class="text-3xl font-display">Aa</div><span class="text-xs mt-1">Poppins</span></button>
+                        <button data-setting="fontFamily" data-value="font-lora" class="w-20 h-20 flex flex-col items-center justify-center rounded-md transition"><div class="text-3xl font-lora">Aa</div><span class="text-xs mt-1">Lora</span></button>
+                        <button data-setting="fontFamily" data-value="font-baskerville" class="w-20 h-20 flex flex-col items-center justify-center rounded-md transition"><div class="text-3xl font-baskerville">Aa</div><span class="text-xs mt-1">Baskerville</span></button>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="font-semibold mb-3">Quebras de Página</h4>
+                     <div class="control-btn-group flex rounded-md p-1">
+                        <button data-setting="pageBreakHeadings" data-value="h1" class="flex-1 px-2 py-1 rounded">H1</button>
+                        <button data-setting="pageBreakHeadings" data-value="h2" class="flex-1 px-2 py-1 rounded">H2</button>
+                        <button data-setting="pageBreakHeadings" data-value="h3" class="flex-1 px-2 py-1 rounded">H3</button>
+                    </div>
+                </div>
+                 <div>
+                    <h4 class="font-semibold mb-3">Tamanho da Fonte</h4>
+                    <div class="control-btn-group flex rounded-md p-1">
+                         <button data-setting="fontSize" data-value="0" class="flex-1 px-2 py-1 rounded">P</button>
+                         <button data-setting="fontSize" data-value="1" class="flex-1 px-2 py-1 rounded">M</button>
+                         <button data-setting="fontSize" data-value="2" class="flex-1 px-2 py-1 rounded">G</button>
+                         <button data-setting="fontSize" data-value="3" class="flex-1 px-2 py-1 rounded">XG</button>
+                         <button data-setting="fontSize" data-value="4" class="flex-1 px-2 py-1 rounded">2XG</button>
+                    </div>
+                </div>
+                <div id="wpm-controls" class="pt-4 border-t">
+                    <h4 class="font-semibold mb-2">Velocidade de Leitura (PPM)</h4>
+                     <p class="text-xs text-gray-400 mb-2">Isso também ajusta a velocidade da Rolagem Automática.</p>
+                    <div class="flex items-center justify-between">
+                         <button id="wpm-decrease" class="px-3 py-1 rounded transition">-</button>
+                         <span id="wpm-display" class="font-mono text-center text-lg">180</span>
+                         <button id="wpm-increase" class="px-3 py-1 rounded transition">+</button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+    
+    <div id="loading-view" class="hidden w-full h-full flex-col items-center justify-center">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400"></div>
+    </div>
+</div>
+
+<script>
+    const ICONS = {
+        play: `<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`,
+        pause: `<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`,
+        settings: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82-.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`,
+        close: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+        arrowLeft: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`,
+        arrowRight: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`,
+        menu: `<svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>`,
+        home: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>`,
+        scrollPlay: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 13l-5 5-5-5M17 6l-5 5-5-5"/></svg>`,
+        scrollPause: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`,
+    };
+    
+    const $ = (selector) => document.querySelector(selector);
+    
+    const setupView = $('#setup-view'), presentationView = $('#presentation-view'), loadingView = $('#loading-view');
+    const dropArea = $('#drop-area'), fileInput = $('#file-input'), previewBtn = $('#preview-btn'), errorMessage = $('#error-message');
+    const clockEl = $('#clock'), pageTitle = $('#page-title'), slidesContainer = $('#slides-container');
+    const prevBtn = $('#prev-btn'), nextBtn = $('#next-btn'), footerCenter = $('#footer-center');
+    const timerPlayPauseBtn = $('#timer-play-pause-btn'), overallTimerEl = $('#overall-timer');
+    const settingsPanel = $('#settings-panel'), settingsToggleBtn = $('#settings-toggle-btn'), closeSettingsBtn = $('#close-settings-btn');
+    const homeBtn = $('#home-btn');
+    const wpmDecreaseBtn = $('#wpm-decrease'), wpmIncreaseBtn = $('#wpm-increase'), wpmDisplay = $('#wpm-display');
+    const historySidebar = $('#history-sidebar'), historyToggleBtn = $('#history-toggle-btn'), closeHistoryBtn = $('#close-history-btn'), historyList = $('#history-list');
+    const autoScrollToggleBtn = $('#auto-scroll-toggle-btn');
+
+    let state = {
+        rawElements: [], slides: [], currentSlide: 0, pageTitle: '',
+        isTimerRunning: false, overallTimerInterval: null, overallSeconds: 0, pageSeconds: 0, 
+        pageTimeHistory: {}, clockInterval: null,
+        isAutoScrolling: false, autoScrollInterval: null,
+        settings: {
+            theme: 'theme-dark', displayMode: 'slides', fontFamily: 'font-sans', fontSize: 2,
+            lineHeight: 'leading-loose', wpm: 180,
+            pageBreakHeadings: ['h1', 'h2'],
+        }
+    };
+
+    const MOCK_HTML = `
+        <h1>Bem-vindo ao Tutorial Interativo!</h1>
+        <p>Esta é uma página de exemplo para você explorar todas as funcionalidades do Visualizador de Documentos. Vamos começar!</p>
+        <p>➡️ Use as setas do teclado, deslize o dedo na tela ou use os botões no rodapé para navegar entre as páginas do tutorial.</p>
+        <h2>Modos de Visualização</h2>
+        <p>Existem dois modos principais. Você pode alternar entre eles no painel de Ajustes (⚙️).</p>
+        <p><strong>1. Modo Páginas (Padrão):</strong> Divide o conteúdo em "slides", usando os títulos (H1, H2, H3) como pontos de quebra. Ideal para apresentações em .docx.</p>
+        <p><strong>2. Modo Rolagem:</strong> Exibe todo o conteúdo como uma única página contínua. É o modo recomendado para arquivos .pdf.</p>
+        <h2>Destaques</h2>
+        <p>Esta é a alternativa inteligente aos "callouts". Qualquer parágrafo que começar com um emoji ou uma barra (/) será transformado em um bloco de destaque, como estes:</p>
+        <p>💡 Esta é uma ótima ideia para se lembrar.</p>
+        <p>/ Esta é uma citação ou um ponto a ser destacado.</p>
+        <p>⚠️ Tenha atenção a este ponto importante.</p>
+        <h2>Painel de Ajustes (⚙️)</h2>
+        <p>Clique no ícone de engrenagem no canto superior direito para abrir o painel de Ajustes. Lá você pode customizar sua experiência de leitura, alterando cores, fontes e muito mais.</p>
+        <h1>Pronto para Começar?</h1>
+        <p>Clique no ícone (🏠) no canto superior esquerdo para voltar à tela inicial, selecione um arquivo .docx ou .pdf e aproveite a leitura!</p>
+    `;
+
+    // Função principal para lidar com o upload de arquivos
+    function loadFile(file) {
+        if (!file) {
+            showError("Nenhum arquivo selecionado.");
+            return;
+        }
+
+        if (file.name.toLowerCase().endsWith('.docx')) {
+            loadDocx(file);
+        } else if (file.name.toLowerCase().endsWith('.pdf')) {
+            loadPdf(file);
+        } else {
+            showError("Formato de arquivo não suportado. Use .docx ou .pdf.");
+        }
+    }
+
+    // Processa arquivos .docx
+    async function loadDocx(file) {
+        showView('loading');
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const arrayBuffer = event.target.result;
+                const result = await mammoth.convertToHtml({ arrayBuffer });
+                
+                state.pageTitle = file.name.replace(/\.docx$/i, '');
+                rebuildSlidesFromHtml(result.value);
+                showView('presentation');
+            } catch (error) {
+                console.error(error);
+                showError(`Falha ao processar o arquivo .docx: ${error.message}`);
+                showView('setup');
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // Processa arquivos .pdf
+    async function loadPdf(file) {
+        showView('loading');
+        // CORREÇÃO: Inicializa o worker do PDF.js de forma compatível com o GitHub Pages
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js`;
+
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const arrayBuffer = event.target.result;
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                let htmlContent = '';
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    
+                    textContent.items.forEach(item => {
+                        if (item.str.trim()) {
+                            htmlContent += `<p>${item.str.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>`;
+                        }
+                    });
+                }
+
+                state.pageTitle = file.name.replace(/\.pdf$/i, '');
+                rebuildSlidesFromHtml(htmlContent);
+                showView('presentation');
+            } catch (error) {
+                console.error('PDF Error:', error);
+                showError(`Falha ao processar o PDF: ${error.message}. O PDF pode estar protegido ou corrompido.`);
+                showView('setup');
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // Função para o modo de tutorial
+    function loadPreview() {
+        showView('loading');
+        state.pageTitle = "Tutorial Interativo";
+        rebuildSlidesFromHtml(MOCK_HTML);
+        showView('presentation');
+    }
+
+    // Converte parágrafos com emoji em "callouts"
+    function processCallouts(container) {
+        const paragraphs = container.querySelectorAll('p');
+        const calloutRegex = /^(?:\/|[\u2700-\u27bf]|(?:\ud83c[\udde6-\uddff]){2}|[\ud800-\udbff][\udc00-\udfff]|[\u0023-\u0039]\ufe0f?\u20e3|\u3299|\u3297|\u303d|\u3030|\u24c2|\ud83c[\udd70-\udd71]|\ud83c[\udd7e-\udd7f]|\ud83c\udd8e|\ud83c[\udd91-\udd9a]|\ud83c[\udde6-\uddff]|\ud83c[\ude01-\ude02]|\ud83c\ude1a|\ud83c\ude2f|\ud83c[\ude32-\ude3a]|\ud83c[\ude50-\ude51]|\u203c|\u2049|[\u25aa-\u25ab]|\u25b6|\u25c0|[\u25fb-\u25fe]|\u00a9|\u00ae|\u2122|\u2139|\ud83c\udc04|[\u2600-\u26FF]|\u2b05|\u2b06|\u2b07|\u2b1b|\u2b1c|\u2b50|\u2b55|\u231a|\u231b|\u2328|\u23cf|[\u23e9-\u23f3]|[\u23f8-\u23fa]|\ud83c\udccf|\u2934|\u2935|[\u2190-\u21ff])\s/;
+
+        paragraphs.forEach(p => {
+            const text = p.textContent.trim();
+            const match = text.match(calloutRegex);
+
+            if (match) {
+                const icon = match[0].trim();
+                p.innerHTML = p.innerHTML.replace(calloutRegex, '');
+
+                const calloutDiv = document.createElement('div');
+                calloutDiv.className = 'doc-callout';
+                calloutDiv.innerHTML = `<span class="emoji">${icon}</span><div class="content"></div>`;
+                calloutDiv.querySelector('.content').appendChild(p.cloneNode(true));
+                p.parentNode.replaceChild(calloutDiv, p);
+            }
+        });
+    }
+
+    function rebuildSlidesFromHtml(htmlContent) {
+        // Se htmlContent for fornecido, um novo arquivo foi carregado.
+        if (htmlContent) {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = htmlContent;
+            processCallouts(tempDiv);
+            state.rawElements = Array.from(tempDiv.children);
+        }
+    
+        stopAutoScroll();
+        
+        const parseElementsIntoSlides = (els) => {
+            if (!els || els.length === 0) return [[]];
+            if (state.settings.displayMode === 'scroll') return [els];
+            
+            const slides = [];
+            let currentSlideContent = [];
+            els.forEach(el => {
+                const tagName = el.tagName.toLowerCase();
+                const isHeading = state.settings.pageBreakHeadings.includes(tagName);
+                
+                if (isHeading && currentSlideContent.length > 0) {
+                    slides.push(currentSlideContent);
+                    currentSlideContent = [];
+                }
+                currentSlideContent.push(el);
+            });
+
+            if (currentSlideContent.length > 0) slides.push(currentSlideContent);
+            return slides.length > 0 ? slides : [[]];
+        };
+
+        state.slides = parseElementsIntoSlides(state.rawElements);
+        state.currentSlide = 0; // Sempre reseta para o primeiro slide
+        state.pageSeconds = 0;
+        state.pageTimeHistory = {};
+
+        renderCurrentSlide();
+        slidesContainer.scrollTop = 0;
+    }
+
+
+    const renderCurrentSlide = () => {
+        const slideData = state.slides[state.currentSlide];
+        const wrapper = document.createElement('div');
+        wrapper.className = 'slide-content w-full h-full space-y-5';
+
+        if (slideData) {
+            slideData.forEach(el => wrapper.appendChild(el.cloneNode(true)));
+        }
+
+        const spacer = document.createElement('div');
+        spacer.style.height = '50vh';
+        wrapper.appendChild(spacer);
+
+        slidesContainer.innerHTML = ''; 
+        slidesContainer.appendChild(wrapper); 
+        pageTitle.textContent = state.pageTitle; 
+        applySettings(); 
+        updateControls(); 
+        renderHistorySidebar(); 
+        requestAnimationFrame(() => requestAnimationFrame(updateFooterInfo));
+    };
+    
+    const showView = (view) => {
+        [setupView, presentationView, loadingView].forEach(v => {
+            v.classList.add('hidden');
+            v.classList.remove('flex');
+        });
+        clearInterval(state.clockInterval);
+
+        if (view === 'setup') {
+            setupView.classList.remove('hidden');
+            setupView.classList.add('flex');
+            stopTimer();
+            stopAutoScroll();
+            closeAllSidebars();
+        } else if (view === 'presentation') {
+            presentationView.classList.remove('hidden');
+            presentationView.classList.add('flex');
+            updateClock();
+            state.clockInterval = setInterval(updateClock, 1000);
+        } else if (view === 'loading') {
+            loadingView.classList.remove('hidden');
+            loadingView.classList.add('flex');
+        }
+    };
+    
+    const showError = (msg) => { errorMessage.textContent = msg; errorMessage.classList.remove('hidden'); };
+    
+    const recordPageTime = () => {
+        if (state.isTimerRunning || state.overallSeconds > 0) {
+            state.pageTimeHistory[state.currentSlide] = (state.pageTimeHistory[state.currentSlide] || 0) + state.pageSeconds;
+        }
+    };
+    const goToSlide = (index) => {
+        if(index >= 0 && index < state.slides.length) {
+            recordPageTime();
+            stopAutoScroll();
+            state.currentSlide = index;
+            state.pageSeconds = 0;
+            slidesContainer.scrollTop = 0; 
+            renderCurrentSlide();
+            toggleHistorySidebar(false);
+        }
+    };
+    const goToNextSlide = () => { if (state.currentSlide < state.slides.length - 1) { goToSlide(state.currentSlide + 1); } };
+    const goToPrevSlide = () => { if (state.currentSlide > 0) { goToSlide(state.currentSlide - 1); } };
+    
+    const updateControls = () => {
+        const isScroll = state.settings.displayMode === 'scroll';
+        prevBtn.style.visibility = isScroll ? 'hidden' : 'visible'; 
+        nextBtn.style.visibility = isScroll ? 'hidden' : 'visible';
+        
+        if (!isScroll) { 
+            prevBtn.disabled = state.currentSlide === 0; 
+            nextBtn.disabled = state.currentSlide >= state.slides.length - 1; 
+        }
+        stopAutoScroll();
+        updateFooterInfo();
+    };
+    
+    const countWordsInElement = (element) => (element && element.textContent) ? element.textContent.trim().split(/\s+/).filter(Boolean).length : 0;
+    const formatTime = (s) => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+    
+    const updateFooterInfo = () => {
+        if (!state.rawElements) return;
+        const wpm = state.settings.wpm;
+        const totalWordsAll = state.rawElements.reduce((acc, el) => acc + countWordsInElement(el), 0);
+        
+        if (totalWordsAll === 0) {
+            footerCenter.innerHTML = '';
+            return;
+        }
+        
+        const { scrollTop, scrollHeight, clientHeight } = slidesContainer;
+        
+        const docBarHTML = `<div class="w-full rounded-full h-2 bg-gray-700"><div id="doc-progress-bar" class="bg-green-500 h-2 rounded-full" style="width: 0%;"></div></div>`;
+
+        if (state.settings.displayMode === 'scroll') {
+            let scrollPercent = scrollHeight > clientHeight ? (scrollTop / (scrollHeight - clientHeight)) : 1;
+            scrollPercent = Math.max(0, Math.min(1, scrollPercent));
+
+            const wordsRead = totalWordsAll * scrollPercent;
+            const wordsRemaining = totalWordsAll - wordsRead;
+            const remainingTimeInSeconds = (wordsRemaining / wpm) * 60;
+                
+            const infoHTML = `<div class="text-center text-sm font-mono mb-2">Tempo Restante: ${formatTime(remainingTimeInSeconds)}</div>`;
+            footerCenter.innerHTML = infoHTML + docBarHTML;
+            $('#doc-progress-bar').style.width = `${scrollPercent * 100}%`;
+
+        } else { // SLIDES MODE
+            const wordsOnPage = (state.slides[state.currentSlide] || []).reduce((acc, el) => acc + countWordsInElement(el), 0);
+            
+            let pageScrollPercent = scrollHeight > clientHeight ? (scrollTop / (scrollHeight - clientHeight)) : (wordsOnPage > 0 ? 1 : 0);
+            pageScrollPercent = Math.max(0, Math.min(1, pageScrollPercent));
+
+            const wordsBeforeCurrentPage = state.slides.slice(0, state.currentSlide).flat().reduce((acc, el) => acc + countWordsInElement(el), 0);
+            const totalWordsRead = wordsBeforeCurrentPage + (wordsOnPage * pageScrollPercent);
+            const docPercent = totalWordsAll > 0 ? (totalWordsRead / totalWordsAll) * 100 : 0;
+
+            const infoHTML = `<div class="text-center text-sm font-mono mb-2">Página ${state.currentSlide + 1} de ${state.slides.length}</div>`;
+            footerCenter.innerHTML = infoHTML + docBarHTML;
+            $('#doc-progress-bar').style.width = `${docPercent}%`;
+        }
+    };
+
+    const renderHistorySidebar = () => {
+        const shouldShow = state.settings.displayMode === 'slides' && state.slides.length > 1;
+        historyToggleBtn.classList.toggle('hidden', !shouldShow);
+        if (!shouldShow) { toggleHistorySidebar(false); return; }
+
+        historyList.innerHTML = '';
+        state.slides.forEach((slide, index) => {
+            const firstElement = slide.find(el => ['h1', 'h2', 'h3'].includes(el.tagName.toLowerCase()));
+            let pageTitleText = firstElement ? firstElement.textContent : `Página ${index + 1}`;
+            
+            const wordsOnPage = slide.reduce((acc, el) => acc + countWordsInElement(el), 0);
+            const estimatedTime = formatTime((wordsOnPage / state.settings.wpm) * 60);
+
+            const item = document.createElement('button');
+            item.className = `history-item w-full text-left p-4 hover:bg-opacity-50 transition-colors border-b ${index === state.currentSlide ? 'active' : ''}`;
+            item.dataset.index = index;
+            item.innerHTML = `<div class="font-semibold truncate" title="${pageTitleText}">${pageTitleText}</div>
+                              <div class="text-sm font-mono mt-1 text-gray-400">Previsto: ${estimatedTime}</div>`;
+            historyList.appendChild(item);
+        });
+    };
+    
+    const closeAllSidebars = () => {
+        document.body.classList.remove('history-open', 'settings-open');
+        historySidebar.classList.remove('open');
+        settingsPanel.classList.remove('open');
+    };
+    const toggleHistorySidebar = (open) => { 
+        if (open) { closeAllSidebars(); historySidebar.classList.add('open'); document.body.classList.add('history-open'); } 
+        else { historySidebar.classList.remove('open'); document.body.classList.remove('history-open'); } 
+    };
+    const toggleSettingsPanel = (open) => { 
+        if (open) { closeAllSidebars(); settingsPanel.classList.add('open'); document.body.classList.add('settings-open'); } 
+        else { settingsPanel.classList.remove('open'); document.body.classList.remove('settings-open'); } 
+    };
+
+    const applyTheme = (newTheme) => {
+        if (newTheme) state.settings.theme = newTheme;
+        const themes = ['theme-light', 'theme-dark', 'theme-sepia'];
+        document.documentElement.className = '';
+        document.documentElement.classList.add(state.settings.theme);
+        if (newTheme && presentationView.classList.contains('flex')) renderCurrentSlide();
+    };
+    
+    const applySettings = () => {
+        const contentWrapper = slidesContainer.querySelector('.slide-content');
+        if (!contentWrapper) return;
+        
+        contentWrapper.classList.remove('font-sans', 'font-serif', 'font-display', 'font-lora', 'font-baskerville', 'leading-relaxed', 'leading-loose', 'leading-extra'); 
+        contentWrapper.classList.add(state.settings.fontFamily, state.settings.lineHeight);
+        
+        const baseSizeRem = 1.25 + (state.settings.fontSize * 0.2);
+        contentWrapper.style.fontSize = `${baseSizeRem}rem`;
+        contentWrapper.querySelectorAll('h1').forEach(h => h.style.fontSize = `${baseSizeRem * 1.8}rem`);
+        contentWrapper.querySelectorAll('h2').forEach(h => h.style.fontSize = `${baseSizeRem * 1.5}rem`);
+        contentWrapper.querySelectorAll('h3').forEach(h => h.style.fontSize = `${baseSizeRem * 1.25}rem`);
+
+        wpmDisplay.textContent = state.settings.wpm;
+        localStorage.setItem('docViewerSettings', JSON.stringify(state.settings));
+        updateFooterInfo(); 
+        updateSettingsUI(); 
+        renderHistorySidebar();
+    };
+
+    const updateSettingsUI = () => {
+        for (const key in state.settings) {
+            if (key === 'wpm') continue;
+            
+            if (key === 'pageBreakHeadings') {
+                document.querySelectorAll(`[data-setting="pageBreakHeadings"]`).forEach(btn => {
+                    btn.classList.toggle('active', state.settings.pageBreakHeadings.includes(btn.dataset.value));
+                });
+            } else {
+                document.querySelectorAll(`[data-setting="${key}"]`).forEach(btn => {
+                    const value = key === 'theme' ? state.settings.theme.replace('theme-', '') : state.settings[key];
+                    btn.classList.toggle('active', btn.dataset.value == value);
+                     if (key === 'theme') {
+                        if (btn.dataset.value === value) {
+                            btn.classList.add('ring-2', 'ring-offset-2', 'ring-blue-500');
+                            const ringColor = document.documentElement.classList.contains('theme-light') ? '#F9FAFB' : '#1F293B';
+                            btn.style.setProperty('--tw-ring-offset-color', ringColor);
+                        } else {
+                            btn.classList.remove('ring-2', 'ring-offset-2', 'ring-blue-500');
+                        }
+                    }
+                });
+            }
+        }
+    };
+    
+    // Funções de timer, scroll e gestos
+    const updateClock = () => { const now = new Date(); clockEl.textContent = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`; };
+    const startTimer = () => { if(state.isTimerRunning) return; state.isTimerRunning = true; timerPlayPauseBtn.innerHTML = ICONS.pause; state.pageSeconds = 0; state.overallTimerInterval = setInterval(() => { state.overallSeconds++; state.pageSeconds++; overallTimerEl.textContent = formatTime(state.overallSeconds); }, 1000); };
+    const stopTimer = () => { if(!state.isTimerRunning) return; recordPageTime(); state.isTimerRunning = false; timerPlayPauseBtn.innerHTML = ICONS.play; clearInterval(state.overallTimerInterval); };
+    const toggleTimer = () => state.isTimerRunning ? stopTimer() : startTimer();
+    const stopAutoScroll = () => { if (!state.isAutoScrolling) return; state.isAutoScrolling = false; autoScrollToggleBtn.innerHTML = ICONS.scrollPlay; if(state.autoScrollInterval) { cancelAnimationFrame(state.autoScrollInterval); clearTimeout(state.autoScrollInterval); } state.autoScrollInterval = null; };
+    
+    const startAutoScroll = () => {
+        if (state.isAutoScrolling) return;
+        const { scrollTop, scrollHeight, clientHeight } = slidesContainer;
+        const scrollableHeight = scrollHeight - clientHeight;
+        if (scrollableHeight < 1) return;
+
+        const remainingScroll = scrollableHeight - scrollTop;
+        if (remainingScroll <= 1) return;
+
+        let wordsRemaining = 0;
+        if (state.settings.displayMode === 'scroll') {
+            const totalWordsAll = state.rawElements.reduce((acc, el) => acc + countWordsInElement(el), 0);
+            const scrollPercent = scrollTop / scrollableHeight;
+            wordsRemaining = totalWordsAll * (1 - scrollPercent);
+        } else {
+            const wordsOnPage = (state.slides[state.currentSlide] || []).reduce((acc, el) => acc + countWordsInElement(el), 0);
+            const pageScrollPercent = scrollTop / scrollableHeight;
+            wordsRemaining = wordsOnPage * (1 - pageScrollPercent);
+        }
+
+        const totalDuration = ((wordsRemaining / state.settings.wpm) * 60 * 1000);
+        if (totalDuration <= 100) {
+            stopAutoScroll();
+            return;
+        }
+
+        state.isAutoScrolling = true;
+        autoScrollToggleBtn.innerHTML = ICONS.scrollPause;
+        let startTime = null;
+        const startScrollTop = scrollTop;
+
+        const scrollStep = (timestamp) => {
+            if (!startTime) startTime = timestamp;
+            const elapsed = timestamp - startTime;
+            const progress = Math.min(elapsed / totalDuration, 1);
+            slidesContainer.scrollTop = startScrollTop + remainingScroll * progress;
+            if (progress < 1) {
+                state.autoScrollInterval = requestAnimationFrame(scrollStep);
+            } else {
+                stopAutoScroll();
+                if (state.settings.displayMode === 'slides' && state.currentSlide < state.slides.length - 1) {
+                    setTimeout(goToNextSlide, 1000);
+                }
+            }
+        };
+        state.autoScrollInterval = requestAnimationFrame(scrollStep);
+    };
+
+    const toggleAutoScroll = () => state.isAutoScrolling ? stopAutoScroll() : startAutoScroll();
+    
+    let touchStartX = 0, touchEndX = 0, touchStartY = 0, touchEndY = 0;
+    const handleTouchStart = (e) => { touchStartX = e.changedTouches[0].screenX; touchStartY = e.changedTouches[0].screenY; };
+    const handleTouchMove = (e) => { touchEndX = e.changedTouches[0].screenX; touchEndY = e.changedTouches[0].screenY; };
+    const handleTouchEnd = () => { if (state.settings.displayMode !== 'slides') return; const deltaX = touchEndX - touchStartX; const deltaY = touchEndY - touchStartY; if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) { if (deltaX < 0) goToNextSlide(); else goToPrevSlide(); } };
+
+    const handleSettingChange = (e) => {
+        const btn = e.target.closest('button[data-setting]');
+        if (!btn) return;
+        const { setting, value } = btn.dataset;
+        let settingChanged = false;
+
+        if (setting === 'theme') {
+            const newTheme = `theme-${value}`;
+            if (state.settings.theme !== newTheme) {
+                applyTheme(newTheme);
+            }
+            return;
+        }
+        
+        if (setting === 'pageBreakHeadings') {
+            const currentBreaks = [...state.settings.pageBreakHeadings];
+            const isCurrentlySet = currentBreaks.includes(value);
+            if (isCurrentlySet) {
+                if (currentBreaks.length > 1) { 
+                    state.settings.pageBreakHeadings = currentBreaks.filter(h => h !== value);
+                    settingChanged = true;
+                }
+            } else {
+                state.settings.pageBreakHeadings.push(value);
+                settingChanged = true;
+            }
+        } else {
+            const newValue = isNaN(value) ? value : parseInt(value);
+            if (state.settings[setting] !== newValue) {
+                state.settings[setting] = newValue;
+                settingChanged = true;
+            }
+        }
+
+        if (settingChanged) {
+            if (setting === 'displayMode' || setting === 'pageBreakHeadings') {
+                rebuildSlidesFromHtml(null); 
+            } else {
+                applySettings();
+            }
+        }
+    };
+
+    const init = () => {
+        const setAppHeight = () => document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+        window.addEventListener('resize', setAppHeight);
+        setAppHeight();
+
+        // Atribuir ícones
+        timerPlayPauseBtn.innerHTML = ICONS.play;
+        settingsToggleBtn.innerHTML = ICONS.settings;
+        closeSettingsBtn.innerHTML = ICONS.close;
+        prevBtn.innerHTML = ICONS.arrowLeft;
+        nextBtn.innerHTML = ICONS.arrowRight;
+        historyToggleBtn.innerHTML = ICONS.menu;
+        closeHistoryBtn.innerHTML = ICONS.close;
+        homeBtn.innerHTML = ICONS.home;
+        autoScrollToggleBtn.innerHTML = ICONS.scrollPlay;
+
+        const savedSettings = JSON.parse(localStorage.getItem('docViewerSettings'));
+        if (savedSettings) state.settings = { ...state.settings, ...savedSettings };
+        applyTheme();
+        
+        // Event listeners
+        previewBtn.addEventListener('click', loadPreview);
+        settingsToggleBtn.addEventListener('click', () => toggleSettingsPanel(!settingsPanel.classList.contains('open')));
+        closeSettingsBtn.addEventListener('click', () => toggleSettingsPanel(false));
+        historyToggleBtn.addEventListener('click', () => toggleHistorySidebar(!historySidebar.classList.contains('open')));
+        closeHistoryBtn.addEventListener('click', () => toggleHistorySidebar(false));
+        homeBtn.addEventListener('click', () => showView('setup'));
+        autoScrollToggleBtn.addEventListener('click', toggleAutoScroll);
+        
+        dropArea.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => loadFile(e.target.files[0]));
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => { dropArea.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }); });
+        ['dragenter', 'dragover'].forEach(eventName => { dropArea.addEventListener(eventName, () => dropArea.classList.add('border-blue-500', 'bg-blue-500/10')); });
+        ['dragleave', 'drop'].forEach(eventName => { dropArea.addEventListener(eventName, () => dropArea.classList.remove('border-blue-500', 'bg-blue-500/10')); });
+        dropArea.addEventListener('drop', (e) => { if (e.dataTransfer.files.length > 0) loadFile(e.dataTransfer.files[0]); });
+
+        slidesContainer.addEventListener('scroll', updateFooterInfo);
+        slidesContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
+        slidesContainer.addEventListener('touchmove', handleTouchMove, { passive: true });
+        slidesContainer.addEventListener('touchend', handleTouchEnd, { passive: true });
+        
+        timerPlayPauseBtn.addEventListener('click', toggleTimer);
+        nextBtn.addEventListener('click', goToNextSlide);
+        prevBtn.addEventListener('click', goToPrevSlide);
+
+        $('.settings-panel-content').addEventListener('click', handleSettingChange);
+        
+        historyList.addEventListener('click', e => {
+            const button = e.target.closest('.history-item');
+            if (button && button.dataset.index) {
+                goToSlide(parseInt(button.dataset.index));
+            }
+        });
+
+        wpmIncreaseBtn.addEventListener('click', () => { state.settings.wpm = Math.min(state.settings.wpm + 10, 500); applySettings(); });
+        wpmDecreaseBtn.addEventListener('click', () => { state.settings.wpm = Math.max(state.settings.wpm - 10, 20); applySettings(); });
+
+        document.addEventListener('keydown', e => {
+            if (presentationView.classList.contains('hidden')) return;
+            if (e.key === 'Escape') {
+                closeAllSidebars();
+            }
+            if (settingsPanel.classList.contains('open') || historySidebar.classList.contains('open')) return;
+            if (state.settings.displayMode === 'slides') {
+                if (e.key === 'ArrowRight' || e.key === ' ') goToNextSlide();
+                if (e.key === 'ArrowLeft') goToPrevSlide();
+            }
+        });
+
+        document.addEventListener('click', e => {
+            const isSidebarOpen = document.body.classList.contains('history-open') || document.body.classList.contains('settings-open');
+            if (!isSidebarOpen) return;
+            const target = e.target;
+            const isClickInsideSidebar = target.closest('#history-sidebar') || target.closest('#settings-panel');
+            const isClickOnToggleButton = target.closest('#history-toggle-btn') || target.closest('#settings-toggle-btn');
+            if (!isClickInsideSidebar && !isClickOnToggleButton) {
+                closeAllSidebars();
+            }
+        });
+
+        applySettings();
+    };
+    
+    document.addEventListener('DOMContentLoaded', init);
+
+</script>
+</body>
+</html>
